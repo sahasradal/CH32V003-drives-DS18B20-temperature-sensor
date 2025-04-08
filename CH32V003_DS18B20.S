@@ -296,7 +296,7 @@
 
 ######################################### SRAM  VARIABLES
 fclk 		= 24000000   		# 24Mhz RCO internal , AHB =8Mhz by default
-state 		= 0x2000000C 		# located in SRAM
+CRC 		= 0x2000000C 		# located in SRAM
 result11 	= 0x20000010 		# 0x20000010 to 0x20000018 is used for storing result in decimal format
 result22 	= 0x20000014
 fraction 	= 0x20000018
@@ -837,48 +837,66 @@ scratch_loop:
 
 
 ##########################
+##########################
 
 	# CRC = X8 + X5 + X4 + 1  = 100110001
-	# width = 8 , 00110001 =0x31
-	# after process is finished if r8 is 0x00 received message is good ,else error
-	# we divide the message including the CRC by polynomial ,if 0 good any other value message corrupt
-	# in_data: .byte 0x02,0x1C,0xB8,0x01,0x00,0x00,0x00 ,0xa2  
-	# Input data  starting with family byte 0x02  ending at CRC bit 0xa2 of ROM read. final answer will be 0 if all correct after shifing 64 bits
-	# for scratch pad data CRC register will have the correct CRC after CRC_CHECK. compare with 9th bit to verify data
-
+	# width = 9 , 100011000 =0x118
+	# data received from sensor stored MSB (CRC) at MEM and byte0 at MEM+8 , CRC>>>>>>TEMPH,TEMPLO 
+	# if ROM read, final answer will be 0 if all correct after shifing 64 bits
+	# for scratch pad data CRC register in SRAM will have the correct CRC after CRC_CHECK. compare with 9th bit to verify data or XOR CRC 
+	# register with received CRC , if result is 0 the received data is good
+	# scratchpad_read function reads and stores data from sensor in non reflected fashion. Bits are re arranged to normal from reflected
+	# which is how DS18B20 sends its data lsb of byte0 first (reflected mirror image of actual bits sequence)
 CRC_CHECK:
-    li x7,64              # when doing ROM CRC will read 0 and scratch pad CRC will have CRC remaining
-    li x3, 8              # Loop counter for 8 bits
-    la a0, in_data        # Load address of in_data
-    la a1, CRC            # Load initial CRC value
+	addi sp,sp,-32
+	sw ra,0(sp)
+	sw x3,4(sp)
+	sw x4,8(sp)
+	sw x5,12(sp)
+	sw x6,16(sp)
+	sw x7,20(sp)
+	sw x10,24(sp)
+	sw x11,28(sp)
+    	li x7,64          	# when doing ROM CRC will read 0 and scratch pad CRC will have CRC remaining
+    	li x3, 8          	# Loop counter for 8 bits
+    	la a0, mem        	# Load address of in_data
+	addi a0,a0,8		# point a0 to byte0 which is stored in MEM+8
+    	la a1, CRC        	# Load initial CRC value
 CRC_LOOP:
-    lbu x4, 0(a0)         # Load the current byte from in_data
-    li x5, 0              # Initialize x5 to the current CRC value
+    	lbu x4, 0(a0)         	# Load the current byte from in_data
+    	li x5, 0              	# Initialize x5 to the current CRC value
 BIT_LOOP:
-    # Check LSB condition
-    xor x6, x5, x4        # x6 = crc XOR inByte
-    andi x6, x6, 1        # Get the LSB of the result
-    beqz x6, xor_with_0   # If LSBs are the same, jump to xor_with_0
-    # If LSBs are different, apply the polynomial
-    xori x5, x5, 0x118    # Apply polynomial 0b100011000 to CRC
+    				# Check LSB condition
+    	xor x6, x5, x4        	# x6 = crc XOR inByte
+    	andi x6, x6, 1        	# Get the LSB of the result
+    	beqz x6, xor_with_0   	# If LSBs are the same, jump to xor_with_0
+    				# If LSBs are different, apply the polynomial
+    	xori x5, x5, 0x118    	# Apply polynomial 0b100011000 to CRC
 xor_with_0:
-    srli x5, x5, 1        # Right shift CRC
-    srli x4, x4, 1        # Right shift inByte
-    addi x7,x7,-1         # Decrement bit counter
-    addi x3, x3, -1       # in_byte counter
-    bnez x3, BIT_LOOP     # If there are more bits to process, repeat BIT_LOOP
-    sb x5,0(a1)           # store intermediate CRC in SRAM
-    beqz x7,exit_CRC_check	
-    # Reset for the next byte
-    addi a0, a0, 1        # Move to the next byte in in_data
-    li x3, 8              # Reset bit counter to 8
-    lbu x4, 0(a0)         # Load new input data
-    lbu x5, 0(a1)         # load the updated CRC value
-    j BIT_LOOP
+    	srli x5, x5, 1        	# Right shift CRC
+    	srli x4, x4, 1        	# Right shift inByte
+    	addi x7,x7,-1         	# Decrement bit counter
+    	addi x3, x3, -1       	# in_byte counter
+    	bnez x3, BIT_LOOP     	# If there are more bits to process, repeat BIT_LOOP
+    	sb x5,0(a1)           	# store intermediate CRC in SRAM
+    	beqz x7,exit_CRC_check	
+    				# Reset for the next byte
+    	addi a0, a0,-1        	# Move to the next byte in in_data
+    	li x3, 8              	# Reset bit counter to 8
+    	lbu x4, 0(a0)         	# Load new input data
+    	lbu x5, 0(a1)         	# load the updated CRC value
+    	j BIT_LOOP
   exit_CRC_check:
-    nop
-    nop
-    ret
+    	lw x11,28(sp)
+	lw x10,24(sp)
+	lw x7,20(sp)
+	lw x6,16(sp)
+	lw x5,12(sp)
+	lw x4,8(sp)
+	lw x3,4(sp)
+	lw ra,0(sp)
+	addi sp,sp,32
+    	ret
 
 
 ####################################
