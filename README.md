@@ -10,3 +10,5 @@
 # I2C for LCD , OLED
 # pin PC1  used for SDA ,I2C 
 # pin PC2  used for SCL ,I2C
+
+DS18B20_test0.S code implements a CRC calculation and verification . If CRC is correct the result is printed on a console through UART @ 9600 BAUD. If result corrupted prints "FAIL"in the console.
